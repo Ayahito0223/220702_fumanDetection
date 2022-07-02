@@ -1,6 +1,5 @@
 import serial
 import os
-import json
 
 from dotenv import load_dotenv
 from slack import SlackAPI
@@ -19,7 +18,7 @@ def main():
     if userInput == 'y':
       val_arduino = ser.readline()
       val_decoded = repr(val_arduino.decode())[1:-5]
-      result = (slack.sendMessage(val_decoded))
+      result = slack.sendMessage(val_decoded)
       if result.get('ok'):
         print('「 {} 」が無事送信されました。'.format(val_decoded))
       else:
