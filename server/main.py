@@ -1,17 +1,38 @@
-import serial
 import socket
 import os
 import ipaddress
 import hashlib
+import threading
 
 from dotenv import load_dotenv
 from slack import SlackAPI
 
+M_SIZE = 1024
+arduino_socket = None
+slack = None
+
+def arduinoResponce():
+  global M_SIZE, arduino_socket, slack
+  counter = 1
+  while True:
+    message, addr = arduino_socket.recvfrom(M_SIZE)
+    if message.decode(encoding='utf-8') == '2':
+      if counter == 1:
+        result = slack.sendMessage("human detected!!!!!!!")
+        if result.get('ok'):
+          print('無事送信されました。')
+        else:
+          print('エラーが起きたようです。')
+          print(result)
+      elif counter == 10:
+        counter = 0
+      counter += 1
+
 def main():
+  global M_SIZE, arduino_socket, slack
+
   load_dotenv()
   SLACK_BOT_USER_OAUTH_TOKEN = os.getenv('SLACK_BOT_USER_OAUTH_TOKEN')
-
-  M_SIZE = 1024
 
   while True:
     try:
@@ -38,9 +59,8 @@ def main():
       str(hashlib.sha256(arduino_pass.encode()).hexdigest()).encode('utf-8'), 
       (arduino_ip_address, arduino_port)
     )
-    print('Arduinoからのレスポンスを待っています。。。。')
+    print('arduinoからのレスポンスを待っています。。。。')
     message, addr = arduino_socket.recvfrom(M_SIZE)
-    print(message.decode(encoding='utf-8'))
     if message.decode(encoding='utf-8') == '1':
       print("接続に成功しました。")
       break
@@ -50,29 +70,14 @@ def main():
 
   slack = SlackAPI(SLACK_BOT_USER_OAUTH_TOKEN)
 
-  while True:
-    message, addr = arduino_socket.recvfrom(M_SIZE)
-    if message.decode(encoding='utf-8') == '2':
-      print("detected!")
+  threading.Thread(target=arduinoResponce, daemon=True).start()
 
-  # while True:
-  #   print('データをslackに送信する場合は、y')
-  #   print('プログラムを止める場合は、q')
-  #   userInput = input('> ')
-  #   if userInput == 'y':
-  #     val_arduino = ser.readline()
-  #     val_decoded = repr(val_arduino.decode())[1:-5]
-  #     result = slack.sendMessage(val_decoded)
-  #     if result.get('ok'):
-  #       print('「 {} 」が無事送信されました。'.format(val_decoded))
-  #     else:
-  #       print('エラーが起きたようです。')
-  #       print(result)
-  #   elif userInput == 'q':
-  #     break
-  #   else:
-  #     print('入力内容がおかしいです。')
-  #     print()
+  print("プログラムを終わる場合は、q")
+  while True:
+    mes = input()
+    if mes == 'q':
+      arduino_socket.sendto('3'.encode('utf-8'), (arduino_ip_address, arduino_port))
+      exit()
 
 if __name__ == "__main__":
   main()

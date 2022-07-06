@@ -1,14 +1,20 @@
 #include <SPI.h>
 #include <WiFiNINA.h>
 #include <WiFiUdp.h>
+#include <Wire.h>
+
 #define PIR_MOTION_SENSOR 4
+#define BUZZER 3
 
 #include "arduino_secrets.h"
+#include "rgb_lcd.h"
 
 char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
 String arduino_pass = SECRET_ARDUINO_PASS;
 int status = WL_IDLE_STATUS;
+
+rgb_lcd lcd;
 
 WiFiUDP Udp;
 unsigned int localPort = 2390;
@@ -17,29 +23,65 @@ char packetBuffer[1024]; //buffer to hold incoming packet
 
 int counter = 0;
 
+bool DEBUG = false;
+
 void setup() {
+  pinMode(BUZZER, INPUT);
   pinMode(PIR_MOTION_SENSOR, INPUT);
+
+  lcd.begin(16, 2);
+  lcd.print("Begin Serial");
 
   Serial.begin(9600);
   while (!Serial) {
+    if (!DEBUG) {
+      break;
+    }
     ; // wait for serial port to connect. Needed for native USB port only
   }
-  initWifi();
-  initUser();
+  while (true) {
+    initWifi();
+    if (!initUser()) {
+      status = 6;
+      continue;
+    }
+    break;
+  }
   Serial.println("Start Detection");
+  lcd.clear();
+  lcd.setRGB(127, 255, 127);
+  lcd.print("start detect!");
+
+  delay(5000);
 }
 
 void loop() {
   if (WiFi.status() == 6) {
+    digitalWrite(BUZZER, LOW);
     status = 6;
-    initWifi();
-    initUser();
+    while (true) {
+      initWifi();
+      if (!initUser()) {
+        status = 6;
+        continue;
+      }
+      break;
+    }
     Serial.println("Start Detection");
+    lcd.clear();
+    lcd.setRGB(127, 255, 127);
+    lcd.print("start detect!");
+
+    delay(5000);
   }
 
   if (digitalRead(PIR_MOTION_SENSOR)) {
     counter += 1;
     if (counter >= 10) {
+      lcd.clear();
+      lcd.print("human detect!");
+      lcd.setRGB(255, 127, 127);
+      digitalWrite(BUZZER, HIGH);
       Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
       Udp.write("2");
       Serial.println("human detected!");
@@ -47,7 +89,47 @@ void loop() {
       counter = 0;
     }
   } else {
+    lcd.clear();
+    lcd.setRGB(127, 255, 127);
+    lcd.print("detecting...");
+    digitalWrite(BUZZER, LOW);
     counter = 0;
+  }
+
+  int packetSize = Udp.parsePacket();
+  if (packetSize) {
+    Serial.print("Received packet of size ");
+    Serial.println(packetSize);
+    Serial.print("From ");
+    IPAddress remoteIp = Udp.remoteIP();
+    Serial.print(remoteIp);
+    Serial.print(", port ");
+    Serial.println(Udp.remotePort());
+
+    // read the packet into packetBufffer
+    int len = Udp.read(packetBuffer, 1023);
+    if (len > 0) {
+      packetBuffer[len] = 0;
+    }
+    Serial.print("Contents:");
+    Serial.println(packetBuffer);
+
+    if (String(packetBuffer).equals("3")) {
+      while (true) {
+        initWifi();
+        if (!initUser()) {
+          status = 6;
+          continue;
+        }
+        break;
+      }
+      Serial.println("Start Detection");
+      lcd.clear();
+      lcd.setRGB(127, 255, 127);
+      lcd.print("start detect!");
+
+      delay(5000);
+    }
   }
 
   delay(100);
@@ -57,6 +139,8 @@ void initWifi() {
   Udp.stop();
 
   // check for the WiFi module:
+  lcd.clear();
+  lcd.print("WiFi NO MODULE!");
   if (WiFi.status() == WL_NO_MODULE) {
     Serial.println("Communication with WiFi module failed!");
     // don't continue
@@ -69,6 +153,9 @@ void initWifi() {
   }
 
   // attempt to connect to WiFi network:
+  lcd.clear();
+  lcd.setRGB(255, 191, 127);
+  lcd.print("wait WiFi...");
   while (status != WL_CONNECTED) {
     Serial.print("Attempting to connect to WPA SSID: ");
     Serial.println(ssid);
@@ -86,9 +173,17 @@ void initWifi() {
   Udp.begin(localPort);
 }
 
-void initUser() {
+bool initUser() {
   bool findServer = false;
+  lcd.clear();
+  lcd.setRGB(255, 255, 127);
+  lcd.print("wait valid user");
+  lcd.setCursor(0, 1);
+  lcd.print(WiFi.localIP());
   while (!findServer) {
+    if (WiFi.status() == 6) {
+      return false;
+    }
     int packetSize = Udp.parsePacket();
     if (packetSize) {
       Serial.print("Received packet of size ");
@@ -120,7 +215,7 @@ void initUser() {
       Serial.println("");
     }
   }
-  delay(5000);
+  return true;
 }
 
 void printWifiData() {
