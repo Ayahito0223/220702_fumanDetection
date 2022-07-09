@@ -50,6 +50,7 @@ def arduinoResponce():
       arduino_socket.sendto(useHashMassage(SERVER_OK), (arduino_ip_address, arduino_port))
       print("detect!!")
       if counter == 1:
+        # pass
         result = slack.sendMessage("human detected!!!!!!!")
         if result.get('ok'):
           print('slackに無事送信されました。')

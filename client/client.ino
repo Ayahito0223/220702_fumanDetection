@@ -23,7 +23,7 @@ char ssid[] = SECRET_SSID;
 char pass[] = SECRET_PASS;
 
 // Arduinoからデータを受け取るためのパスワード
-String arduino_pass = SECRET_ARDUINO_PASS;
+String arduino_pass;
 
 // データを受け取るポート番号
 unsigned int localPort = 2390;
@@ -109,7 +109,7 @@ void setup() {
     }
     ;
   }
-  //  Serial.println((2 + 1) % 3);
+  arduino_pass = hashed(&sha256, SECRET_ARDUINO_PASS);
 }
 
 void loop() {
