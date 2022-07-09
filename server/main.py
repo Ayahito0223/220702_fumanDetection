@@ -26,11 +26,14 @@ STREAM_PASS_SIZE = 32
 
 slack = None
 
-def checkHashMessage(original):
+def checkHashMessage(original, sendMessage):
   global streamPass, streamPassCounter
   result = hashlib.sha256((original + streamPass[streamPassCounter]).encode()).hexdigest()
-  streamPassCounter = (streamPassCounter + 1) % STREAM_PASS_SIZE
-  return result
+  if sendMessage == result:
+    streamPassCounter = (streamPassCounter + 1) % STREAM_PASS_SIZE
+    return True
+  else:
+    return False
 
 def useHashMassage(message):
   global streamPass, streamPassCounter
@@ -43,12 +46,13 @@ def arduinoResponce():
   counter = 1
   while True:
     message, addr = arduino_socket.recvfrom(M_SIZE)
-    if message.decode(encoding='utf-8') == checkHashMessage(HUMAN_DETECTED):
+    if checkHashMessage(HUMAN_DETECTED, message.decode(encoding='utf-8')):
       arduino_socket.sendto(useHashMassage(SERVER_OK), (arduino_ip_address, arduino_port))
+      print("detect!!")
       if counter == 1:
         result = slack.sendMessage("human detected!!!!!!!")
         if result.get('ok'):
-          print('無事送信されました。')
+          print('slackに無事送信されました。')
         else:
           print('エラーが起きたようです。')
           print(result)
@@ -59,7 +63,6 @@ def arduinoResponce():
 def main():
   global M_SIZE, arduino_socket, slack, streamPass, arduino_ip_address, arduino_port
 
-  print(hashlib.sha256('abc'.encode()).hexdigest())
   load_dotenv()
   SLACK_BOT_USER_OAUTH_TOKEN = os.getenv('SLACK_BOT_USER_OAUTH_TOKEN')
 
@@ -93,7 +96,6 @@ def main():
     if message.decode(encoding='utf-8') == USER_VALID:
       randlst = [random.choice(string.ascii_letters + string.digits) for i in range(STREAM_PASS_SIZE)]
       streamPass = ''.join(randlst)
-      print(streamPass)
       time.sleep(2)
       arduino_socket.sendto(streamPass.encode('utf-8'), (arduino_ip_address, arduino_port))
       print("接続に成功しました。")

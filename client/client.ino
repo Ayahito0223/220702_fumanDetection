@@ -15,6 +15,7 @@
 // BUZZERのpinは3
 #define BUZZER 3
 
+/* ----- Wifi関連の変数定義 -----*/
 // SSID
 char ssid[] = SECRET_SSID;
 
@@ -36,6 +37,15 @@ WiFiUDP Udp;
 // UDPで送られて来たデータを入れるための変数
 char packetBuffer[1024];
 
+// サーバーのIPアドレスとポートを保持
+IPAddress serverIp;
+int serverPort;
+
+// python側からの接続が返ってくるまでの制限時間の最大値
+const int SERVER_TIME_LIMIT = 50000;
+
+/* ----- ↑Wifi関連の変数定義↑ -----*/
+
 // LCDを使うための変数
 rgb_lcd lcd;
 
@@ -50,17 +60,40 @@ int counter = 0;
 // 処理を制御する変数
 int processNum = 0;
 
-// SHA256でハッシュ化するための変数
-SHA256 sha256;
-
 // DEBUG用のフラグ（Serialの内容を読みたい時Trueに、Arudinoを独立して動かす時にはFalse）
-bool DEBUG = false;
+bool DEBUG = true;
 
+// 通信内容の番号
 #define USER_INVALID "0"
 #define USER_VALID "1"
 #define HUMAN_DETECTED "2"
 #define SERVER_OK "5"
 #define SERVER_QUIT "9"
+
+/* ----- SHA256でのハッシュ化に関連する変数と処理 -----*/
+// SHA256でハッシュ化するための変数
+SHA256 sha256;
+#define HASH_SIZE 32
+#define BLOCK_SIZE 64
+char hex[256];
+
+char *btoh(char *dest, uint8_t *src, int len) {
+  char *d = dest;
+  while ( len-- ) sprintf(d, "%02x", (unsigned char)*src++), d += 2;
+  return dest;
+}
+
+char* hashed(Hash *hash, const char* hashvalue)
+{
+  uint8_t value[HASH_SIZE];
+
+  hash->reset();
+  hash->update(hashvalue, strlen(hashvalue));
+  hash->finalize(value, sizeof(value));
+
+  return btoh(hex, value, 32);
+}
+/* ----- ↑SHA256でのハッシュ化に関連する変数と処理↑ -----*/
 
 void setup() {
   pinMode(BUZZER, INPUT);
@@ -76,7 +109,7 @@ void setup() {
     }
     ;
   }
-//  Serial.println((2 + 1) % 3);
+  //  Serial.println((2 + 1) % 3);
 }
 
 void loop() {
@@ -123,12 +156,16 @@ void loop() {
           lcd.print("human detect!");
           lcd.setRGB(255, 127, 127);
           digitalWrite(BUZZER, HIGH);
-          Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
-          Udp.write(useHashMessage(HUMAN_DETECTED));
-          Serial.println("human detected!");
+          Udp.beginPacket(serverIp, serverPort);
+          char* sendStr = useHashMessage(HUMAN_DETECTED);
+          Udp.write(sendStr);
           Udp.endPacket();
+
+          Serial.println("human detected!");
+          sendLogPrint(serverIp, serverPort, sendStr);
           counter = 0;
 
+          // serverからデータを受け取ったというレスポンスを得る。
           delay(1000);
           int quitCount = 0;
           while (true) {
@@ -136,30 +173,23 @@ void loop() {
               processNum = 0;
               break;
             }
-            if (quitCount >= 40000) {
+            if (quitCount >= SERVER_TIME_LIMIT) {
               processNum = 1;
               break;
             }
             int packetSize = Udp.parsePacket();
             if (packetSize) {
-              Serial.print("Received packet of size ");
-              Serial.println(packetSize);
-              Serial.print("From ");
-              IPAddress remoteIp = Udp.remoteIP();
-              Serial.print(remoteIp);
-              Serial.print(", port ");
-              Serial.println(Udp.remotePort());
-
-              // read the packet into packetBufffer
               int len = Udp.read(packetBuffer, 1023);
               if (len > 0) {
                 packetBuffer[len] = 0;
               }
-              Serial.print("Contents:");
-              Serial.println(packetBuffer);
 
-              if (String(packetBuffer).equals(checkHashMessage(SERVER_OK))) {
-                break;
+              recieveLogPrint(packetBuffer);
+
+              if (((String)serverIp).equals((String)Udp.remoteIP()) && serverPort == Udp.remotePort()) {
+                if (checkHashMessage(SERVER_OK, packetBuffer)) {
+                  break;
+                }
               }
             }
             quitCount += 1;
@@ -172,27 +202,19 @@ void loop() {
         digitalWrite(BUZZER, LOW);
         counter = 0;
 
-        // pythonからのデータを受け取る。
+        // pythonからのデータを受け取る。（python側のプログラムを終了するという情報を受け取る）
         int packetSize = Udp.parsePacket();
         if (packetSize) {
-          Serial.print("Received packet of size ");
-          Serial.println(packetSize);
-          Serial.print("From ");
-          IPAddress remoteIp = Udp.remoteIP();
-          Serial.print(remoteIp);
-          Serial.print(", port ");
-          Serial.println(Udp.remotePort());
-
-          // read the packet into packetBufffer
           int len = Udp.read(packetBuffer, 1023);
           if (len > 0) {
             packetBuffer[len] = 0;
           }
-          Serial.print("Contents:");
-          Serial.println(packetBuffer);
+          recieveLogPrint(packetBuffer);
 
-          if (String(packetBuffer).equals(checkHashMessage(SERVER_QUIT))) {
-            processNum = 1;
+          if (((String)serverIp).equals((String)Udp.remoteIP()) && serverPort == Udp.remotePort()) {
+            if (checkHashMessage(SERVER_QUIT, packetBuffer)) {
+              processNum = 1;
+            }
           }
         }
       }
@@ -203,34 +225,17 @@ void loop() {
   }
 }
 
-#define HASH_SIZE 32
-#define BLOCK_SIZE 64
-char hex[256];
-byte buffer[128];
-
-char *btoh(char *dest, uint8_t *src, int len) {
- char *d = dest;
- while( len-- ) sprintf(d, "%02x", (unsigned char)*src++), d += 2;
- return dest;
-}
-
-char* hashed(Hash *hash, const char* hashvalue)
-{
-  uint8_t value[HASH_SIZE];
-
-  hash->reset();
-  hash->update(hashvalue, strlen(hashvalue));
-  hash->finalize(value, sizeof(value));
-  
-  return btoh(hex, value, 32);
-}
-
-char* checkHashMessage(char* original) {
+bool checkHashMessage(char* original, char* sendMessage) {
   String num = original;
   String pass = (String)streamPass[streamPassCounter];
   String str = num + pass;
-  streamPassCounter = (streamPassCounter + 1) % STREAM_PASS_SIZE;
-  return hashed(&sha256, str.c_str());
+  String result = hashed(&sha256, str.c_str());
+  if (result.equals((String)sendMessage)) {
+    streamPassCounter = (streamPassCounter + 1) % STREAM_PASS_SIZE;
+    return true;
+  } else {
+    return false;
+  }
 }
 
 char* useHashMessage(char* message) {
@@ -281,91 +286,120 @@ void initWifi() {
 
 bool initUser() {
   bool findUser = false;
+  serverIp = IPAddress();
+  serverPort = -1;
 
-  Serial.println("wait valid user");
+  Serial.println("wait valid user...");
+  Serial.println("");
 
   lcd.clear();
   lcd.setRGB(255, 255, 127);
   lcd.print("wait valid user");
   lcd.setCursor(0, 1);
   lcd.print(WiFi.localIP());
+
+  // python側からのパスワード受け取りと認証
+  // 認証に成功したら、1を送信、失敗したら2を送信。
   while (!findUser) {
     if (WiFi.status() == 6) {
       return false;
     }
     int packetSize = Udp.parsePacket();
     if (packetSize) {
-      Serial.print("Received packet of size ");
-      Serial.println(packetSize);
-      Serial.print("From ");
-      IPAddress remoteIp = Udp.remoteIP();
-      Serial.print(remoteIp);
-      Serial.print(", port ");
-      Serial.println(Udp.remotePort());
-
-      // read the packet into packetBufffer
       int len = Udp.read(packetBuffer, 1023);
       if (len > 0) {
         packetBuffer[len] = 0;
       }
-      Serial.print("Contents:");
-      Serial.println(packetBuffer);
+
+      recieveLogPrint(packetBuffer);
 
       Udp.beginPacket(Udp.remoteIP(), Udp.remotePort());
       if (arduino_pass.equals(String(packetBuffer))) {
         Udp.write(USER_VALID);
         findUser = true;
+        serverIp = Udp.remoteIP();
+        serverPort = Udp.remotePort();
+
+        sendLogPrint(serverIp, serverPort, USER_VALID);
       } else {
         Udp.write(USER_INVALID);
+        sendLogPrint(Udp.remoteIP(), Udp.remotePort(), USER_INVALID);
         Serial.println("Invalid server");
+        Serial.println("");
       }
       Udp.endPacket();
-      Serial.println("");
     }
   }
+
+  // 認証に成功したら、python側から作成されたstreamPassを受け取る。
   delay(1500);
+  int quitCount = 0;
   while (true) {
     if (WiFi.status() == 6) {
       return false;
     }
+    if (quitCount >= SERVER_TIME_LIMIT) {
+      return false;
+    }
     int packetSize = Udp.parsePacket();
     if (packetSize) {
-      Serial.print("Received packet of size ");
-      Serial.println(packetSize);
-      Serial.print("From ");
-      IPAddress remoteIp = Udp.remoteIP();
-      Serial.print(remoteIp);
-      Serial.print(", port ");
-      Serial.println(Udp.remotePort());
+      if (((String)serverIp).equals((String)Udp.remoteIP()) && serverPort == Udp.remotePort()) {
+        int len = Udp.read(streamPass, STREAM_PASS_SIZE);
+        if (len > 0) {
+          streamPass[len] = 0;
+        }
+        recieveLogPrint(streamPass);
 
-      int len = Udp.read(streamPass, STREAM_PASS_SIZE);
-      if (len > 0) {
-        streamPass[len] = 0;
+        streamPassCounter = 0;
+
+        Serial.println("valid server!");
+        Serial.println("");
+        break;
+      } else {
+        int len = Udp.read(packetBuffer, 1023);
+        if (len > 0) {
+          packetBuffer[len] = 0;
+        }
+        recieveLogPrint(packetBuffer);
+
+        Serial.println("No Match IP and Port");
+        Serial.println("");
       }
-      Serial.print("Contents:");
-      Serial.println(streamPass);
-      Serial.println(strlen(streamPass));
-      streamPassCounter = 0;
-
-      Serial.println("valid server!");
-      Serial.println("");
-      break;
     }
+    quitCount += 1;
   }
   return true;
 }
 
+void recieveLogPrint(char* packetMessage) {
+  Serial.print("From ");
+  Serial.print(Udp.remoteIP());
+  Serial.print(", port ");
+  Serial.println(Udp.remotePort());
+  Serial.print("Contents:");
+  Serial.println(packetMessage);
+  Serial.println("");
+}
+
+void sendLogPrint(IPAddress ip, int port, char* packetMessage) {
+  Serial.print("To ");
+  Serial.print(ip);
+  Serial.print(", port ");
+  Serial.println(port);
+  Serial.print("Content: ");
+  Serial.println(packetMessage);
+  Serial.println("");
+}
+
+// Wifiの情報出力
 void printWifiData() {
-  // print your board's IP address:
   IPAddress ip = WiFi.localIP();
   Serial.print("IP Address: ");
   Serial.println(ip);
 
-  // print port
   Serial.print("Listening Port: ");
   Serial.println(localPort);
 
-  // print your MAC address:
   byte mac[6];
   WiFi.macAddress(mac);
   Serial.print("MAC address: ");
@@ -373,29 +407,27 @@ void printWifiData() {
   Serial.println("");
 }
 
+// ネットワークの情報出力
 void printCurrentNet() {
-  // print the SSID of the network you're attached to:
   Serial.print("SSID: ");
   Serial.println(WiFi.SSID());
 
-  // print the MAC address of the router you're attached to:
   byte bssid[6];
   WiFi.BSSID(bssid);
   Serial.print("BSSID: ");
   printMacAddress(bssid);
 
-  // print the received signal strength:
   long rssi = WiFi.RSSI();
   Serial.print("signal strength (RSSI):");
   Serial.println(rssi);
 
-  // print the encryption type:
   byte encryption = WiFi.encryptionType();
   Serial.print("Encryption Type:");
   Serial.println(encryption, HEX);
   Serial.println();
 }
 
+// MacアドレスをSerialに出力
 void printMacAddress(byte mac[]) {
   for (int i = 5; i >= 0; i--) {
     if (mac[i] < 16) {
