@@ -61,7 +61,7 @@ int counter = 0;
 int processNum = 0;
 
 // DEBUG用のフラグ（Serialの内容を読みたい時Trueに、Arudinoを独立して動かす時にはFalse）
-bool DEBUG = true;
+bool DEBUG = false;
 
 // 通信内容の番号
 #define USER_INVALID "0"
