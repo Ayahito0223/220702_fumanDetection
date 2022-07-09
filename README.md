@@ -4,7 +4,7 @@
 # DEMO
 ### 全体
 ![picture1](md_imgs/img-01.jpg)
-### 人を検知した時
+### 人を検知する時
 ![picture2](md_imgs/img-02.jpg)
 ### サーバー側のプログラムのログ
 ![picture3](md_imgs/img-03.jpg)
@@ -70,7 +70,7 @@
 4. .envファイルの作成<br>SlackのAPIを取得し、`env-template.txt`にしたがって`.env`ファイルを作成
 
 ## Arduino
-1. `arduino_secrets.h`の各項目を接続するWiFiに合わせる。<br>`SECRET_ARDUINO_PASS`は、サーバーの認証を行う際に必要となるもの。
+1. `arduino_secrets.h`の各項目を接続するWiFiに合わせる。<br>`SECRET_ARDUINO_PASS`は、サーバーの認証を行う際に必要となるもの。任意に決めて大丈夫。
 2. BUZZERは`D3`へ
 3. PIR Motion sensorは`D4`へ
 4. Grove-LCDは`I2O`へ
